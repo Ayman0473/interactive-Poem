@@ -64,7 +64,7 @@ poem_to_visual/
 **1. Clone and set up Python environment**
 
 ```bash
-git clone https://github.com/yourusername/poem-to-visual.git
+git clone https://github.com/Ayman0473/interactive-Poem.git
 cd poem-to-visual
 python -m venv venv
 venv\Scripts\activate        # Windows
