@@ -1,20 +1,22 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import sys, os, json, asyncio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from embedder import get_mood
 from keyword_extractor import extract_keywords
-from image_generator import generate_image
-from stanza_pipeline import split_into_stanzas
+from image_generator import get_image_url
+
+from fastapi.responses import Response
+import httpx
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],  # will lock down after deployment
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -22,43 +24,27 @@ app.add_middleware(
 class PoemRequest(BaseModel):
     poem: str
 
-@app.post("/generate")
-async def generate(req: PoemRequest):
-    """Original single-image endpoint — keep for backward compatibility."""
-    mood, confidence = get_mood(req.poem)
-    keywords = extract_keywords(req.poem, mood)
-    generate_image(keywords, mood, "output.png")
-    return {
-        "mood": mood,
-        "confidence": round(confidence, 3),
-        "keywords": keywords,
-        "image_url": "/image"
-    }
+def split_into_stanzas(poem_text):
+    import re
+    raw = re.split(r'\n\s*\n', poem_text.strip())
+    return [s.strip() for s in raw if s.strip()]
 
-@app.get("/image")
-def get_image():
-    return FileResponse("output.png", media_type="image/png")
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "poem-to-visual"}
 
 @app.post("/generate-stanzas")
 async def generate_stanzas(req: PoemRequest):
-    """
-    Server-sent events endpoint — streams stanza results as they complete.
-    Frontend receives each stanza the moment its image is ready.
-    """
     stanzas = split_into_stanzas(req.poem)
 
     async def stream():
-        # First event: tell the frontend how many stanzas to expect
         yield f"data: {json.dumps({'type': 'count', 'total': len(stanzas)})}\n\n"
 
         for i, stanza_text in enumerate(stanzas):
-            # Run pipeline for this stanza
             mood, confidence = get_mood(stanza_text)
             keywords = extract_keywords(stanza_text, mood)
-            output_path = f"stanza_{i}.png"
-            generate_image(keywords, mood, output_path)
+            image_url = get_image_url(keywords, mood)
 
-            # Stream the result immediately
             event = {
                 "type": "stanza",
                 "index": i,
@@ -66,12 +52,11 @@ async def generate_stanzas(req: PoemRequest):
                 "mood": mood,
                 "confidence": round(confidence, 3),
                 "keywords": keywords,
-                "image_url": f"/stanza-image/{i}",
+                "image_url": image_url,
             }
             yield f"data: {json.dumps(event)}\n\n"
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(3)
 
-        # Final event: all done
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
@@ -80,9 +65,17 @@ async def generate_stanzas(req: PoemRequest):
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
 
-@app.get("/stanza-image/{index}")
-def get_stanza_image(index: int):
-    path = f"stanza_{index}.png"
-    if not os.path.exists(path):
-        return {"error": "Image not found"}
-    return FileResponse(path, media_type="image/png")
+
+@app.get("/proxy-image")
+async def proxy_image(url: str):
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        r = await client.get(url)
+        content_type = r.headers.get("content-type", "image/jpeg")
+        return Response(
+            content=r.content,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )

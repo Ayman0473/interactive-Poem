@@ -1,18 +1,67 @@
 import { useState, useRef } from "react"
 
 const MOOD_STYLES = {
-  tranquil:    { bg: "#e8f4f0", accent: "#2d8a6e", emoji: "🌿" },
-  melancholic: { bg: "#e8eef4", accent: "#3a5a8a", emoji: "🌧️" },
-  joyful:      { bg: "#fdf6e8", accent: "#c8860a", emoji: "☀️" },
-  defiant:     { bg: "#f4e8e8", accent: "#8a2a2a", emoji: "⚡" },
-  nostalgic:   { bg: "#f0e8f4", accent: "#6a3a8a", emoji: "🕰️" },
+  tranquil:    { accent: "#2d8a6e", emoji: "🌿" },
+  melancholic: { accent: "#3a5a8a", emoji: "🌧️" },
+  joyful:      { accent: "#c8860a", emoji: "☀️" },
+  defiant:     { accent: "#8a2a2a", emoji: "⚡" },
+  nostalgic:   { accent: "#6a3a8a", emoji: "🕰️" },
 }
 
-const DEFAULT_STYLE = { bg: "#f0f0f0", accent: "#555", emoji: "✨" }
+const DEFAULT_STYLE = { accent: "#555", emoji: "✨" }
+
+function StanzaImage({ url }) {
+  const [loaded, setLoaded] = useState(false)
+  const [retries, setRetries] = useState(0)
+
+  function handleError() {
+    if (retries < 3) {
+      setTimeout(() => {
+        setRetries(r => r + 1)
+      }, 15000)
+    }
+  }
+
+  // Route through backend proxy to avoid CORB
+  const proxied = `/api/proxy-image?url=${encodeURIComponent(url)}`
+  const src = retries === 0 ? proxied : `${proxied}&_retry=${retries}`
+
+  return (
+    <>
+      {/* Dark fallback while loading */}
+      {!loaded && (
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "#0d0d0d",
+          display: "flex", alignItems: "center", justifyContent: "center"
+        }}>
+          <div style={{ fontSize: 11, color: "#333", letterSpacing: 3, fontFamily: "system-ui" }}>
+            RENDERING IMAGE{retries > 0 ? ` (attempt ${retries + 1})` : "..."}
+          </div>
+        </div>
+      )}
+      <img
+        key={retries}
+        src={src}
+        alt=""
+        onLoad={() => setLoaded(true)}
+        onError={handleError}
+        style={{
+          position: "absolute", inset: 0,
+          width: "100%", height: "100%",
+          objectFit: "cover",
+          filter: "brightness(0.35)",
+          opacity: loaded ? 1 : 0,
+          transition: "opacity 1s ease",
+        }}
+      />
+    </>
+  )
+}
 
 export default function App() {
   const [poem, setPoem]       = useState("")
-  const [phase, setPhase]     = useState("input")   // input | generating | experience
+  const [phase, setPhase]     = useState("input")
   const [stanzas, setStanzas] = useState([])
   const [total, setTotal]     = useState(0)
   const [error, setError]     = useState(null)
@@ -26,7 +75,7 @@ export default function App() {
     setTotal(0)
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/generate-stanzas", {
+      const res = await fetch("/api/generate-stanzas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ poem })
@@ -55,7 +104,7 @@ export default function App() {
             setPhase("experience")
             setTimeout(() => {
               experienceRef.current?.scrollIntoView({ behavior: "smooth" })
-            }, 100)
+            }, 300)
           }
         }
       }
@@ -129,7 +178,9 @@ export default function App() {
             </div>
           )}
 
-          {error && <p style={{ color: "#c0392b", fontSize: 13, marginTop: 8, fontFamily: "system-ui" }}>{error}</p>}
+          {error && (
+            <p style={{ color: "#c0392b", fontSize: 13, marginTop: 8, fontFamily: "system-ui" }}>{error}</p>
+          )}
 
           <button
             onClick={generate}
@@ -159,28 +210,23 @@ export default function App() {
                 minHeight: "100vh", position: "relative",
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                {/* Background image */}
-                <div style={{
-                  position: "absolute", inset: 0,
-                  backgroundImage: `url(http://127.0.0.1:8000/stanza-image/${stanza.index}?t=${Date.now()})`,
-                  backgroundSize: "cover", backgroundPosition: "center",
-                  filter: "brightness(0.35)",
-                  transition: "opacity 0.8s ease",
-                }}/>
+
+                {/* Background image with retry logic */}
+                <StanzaImage url={stanza.image_url} />
 
                 {/* Gradient overlay */}
                 <div style={{
                   position: "absolute", inset: 0,
-                  background: "linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.7) 100%)"
+                  background: "linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.7) 100%)",
+                  zIndex: 1
                 }}/>
 
                 {/* Content */}
                 <div style={{
-                  position: "relative", zIndex: 1,
+                  position: "relative", zIndex: 2,
                   maxWidth: 640, padding: "80px 40px",
                   textAlign: "center",
                 }}>
-                  {/* Stanza number */}
                   <div style={{
                     fontSize: 11, letterSpacing: 4, textTransform: "uppercase",
                     color: style.accent, marginBottom: 32, fontFamily: "system-ui"
@@ -188,7 +234,6 @@ export default function App() {
                     {style.emoji} &nbsp; Stanza {i + 1} &nbsp;·&nbsp; {stanza.mood}
                   </div>
 
-                  {/* Poem text */}
                   <div style={{
                     fontSize: "clamp(18px, 2.5vw, 26px)", lineHeight: 1.9,
                     color: "#f0f0f0", whiteSpace: "pre-line",
@@ -198,7 +243,6 @@ export default function App() {
                     {stanza.text}
                   </div>
 
-                  {/* Keywords */}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
                     {stanza.keywords.map((kw, j) => (
                       <span key={j} style={{
@@ -214,11 +258,10 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Scroll hint on first stanza */}
                 {i === 0 && (
                   <div style={{
                     position: "absolute", bottom: 32, left: "50%",
-                    transform: "translateX(-50%)",
+                    transform: "translateX(-50%)", zIndex: 2,
                     fontSize: 11, color: "#555", letterSpacing: 3,
                     textTransform: "uppercase", fontFamily: "system-ui",
                     animation: "pulse 2s infinite"
