@@ -1,25 +1,26 @@
-from sentence_transformers import SentenceTransformer, util
+from groq import Groq
+from config import GROQ_API_KEY
 
-_model = None
+client = Groq(api_key=GROQ_API_KEY)
 
-def get_model():
-    global _model
-    if _model is None:
-        _model = SentenceTransformer('all-MiniLM-L6-v2')
-    return _model
-
-MOOD_DESCRIPTIONS = {
-    "melancholic": "death, grief, sorrow, loss, mourning, darkness, despair, decay, fading, gone forever, tears, absence, emptiness, withering",
-    "joyful": "happiness, celebration, laughter, delight, sunshine, warmth, love, dancing, blooming, radiant, bright, singing, joy",
-    "defiant": "resistance, rising, refusing, fighting, strength, unbowed, unconquerable, defiance, power, stand, refuse, rebel, overcome",
-    "tranquil": "stillness, peace, quiet, calm, gentle, silence, rest, serene, soft, slow, breathing, accepting, nature, undisturbed",
-    "nostalgic": "remember, childhood, past, long ago, used to, once, home, memory, return, lost, years ago, miss, before, gone",
-}
+MOODS = ["melancholic", "joyful", "defiant", "tranquil", "nostalgic"]
 
 def get_mood(poem_text):
-    model = get_model()
-    poem_emb = model.encode(poem_text)
-    mood_embs = model.encode(list(MOOD_DESCRIPTIONS.values()))
-    scores = util.cos_sim(poem_emb, mood_embs)[0].tolist()
-    ranked = sorted(zip(MOOD_DESCRIPTIONS.keys(), scores), key=lambda x: x[1], reverse=True)
-    return ranked[0][0], round(ranked[0][1], 4)
+    prompt = f"""Classify the emotional mood of this poem into exactly one of these categories: {', '.join(MOODS)}.
+
+Poem:
+{poem_text}
+
+Reply with ONLY the mood word, nothing else."""
+
+    response = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=10,
+        temperature=0,
+    )
+
+    mood = response.choices[0].message.content.strip().lower()
+    if mood not in MOODS:
+        mood = "melancholic"
+    return mood, 0.85
