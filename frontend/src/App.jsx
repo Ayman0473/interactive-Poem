@@ -1,200 +1,270 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
 
-const MOODS = {
-  tranquil:   { color: "#5BA865", bg: "#e6f4ec", emoji: "🌿" },
-  melancholic:{ color: "#5B8DB8", bg: "#e8f0f9", emoji: "🌧️" },
-  joyful:     { color: "#E8A838", bg: "#fdf8e6", emoji: "☀️" },
-  defiant:    { color: "#C85250", bg: "#fdf0e8", emoji: "⚡" },
-  nostalgic:  { color: "#9B6B9B", bg: "#f5eef8", emoji: "🕰️" },
+const MOOD_STYLES = {
+  tranquil:    { bg: "#e8f4f0", accent: "#2d8a6e", emoji: "🌿" },
+  melancholic: { bg: "#e8eef4", accent: "#3a5a8a", emoji: "🌧️" },
+  joyful:      { bg: "#fdf6e8", accent: "#c8860a", emoji: "☀️" },
+  defiant:     { bg: "#f4e8e8", accent: "#8a2a2a", emoji: "⚡" },
+  nostalgic:   { bg: "#f0e8f4", accent: "#6a3a8a", emoji: "🕰️" },
 }
+
+const DEFAULT_STYLE = { bg: "#f0f0f0", accent: "#555", emoji: "✨" }
 
 export default function App() {
   const [poem, setPoem]       = useState("")
-  const [step, setStep]       = useState("idle")  // idle → loading → mood → keywords → image → done
-  const [mood, setMood]       = useState(null)
-  const [confidence, setConf] = useState(null)
-  const [keywords, setKw]     = useState([])
-  const [imageUrl, setImg]    = useState(null)
+  const [phase, setPhase]     = useState("input")   // input | generating | experience
+  const [stanzas, setStanzas] = useState([])
+  const [total, setTotal]     = useState(0)
   const [error, setError]     = useState(null)
-  const [visibleKw, setVisKw] = useState(0)
+  const experienceRef         = useRef(null)
 
   async function generate() {
     if (!poem.trim()) return
-    setStep("loading")
-    setMood(null); setConf(null); setKw([]); setImg(null)
-    setError(null); setVisKw(0)
+    setPhase("generating")
+    setStanzas([])
+    setError(null)
+    setTotal(0)
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/generate", {
+      const res = await fetch("http://127.0.0.1:8000/generate-stanzas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ poem })
       })
-      if (!res.ok) throw new Error("Server error")
-      const data = await res.json()
 
-      // Step 1: show mood
-      setMood(data.mood)
-      setConf(data.confidence)
-      setStep("mood")
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
 
-      // Step 2: reveal keywords one by one
-      await delay(600)
-      setKw(data.keywords)
-      setStep("keywords")
-      for (let i = 1; i <= data.keywords.length; i++) {
-        await delay(300)
-        setVisKw(i)
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop()
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue
+          const data = JSON.parse(line.slice(6))
+
+          if (data.type === "count") {
+            setTotal(data.total)
+          } else if (data.type === "stanza") {
+            setStanzas(prev => [...prev, data])
+          } else if (data.type === "done") {
+            setPhase("experience")
+            setTimeout(() => {
+              experienceRef.current?.scrollIntoView({ behavior: "smooth" })
+            }, 100)
+          }
+        }
       }
-
-      // Step 3: show image
-      await delay(400)
-      setImg("http://127.0.0.1:8000/image?t=" + Date.now())
-      setStep("done")
-
     } catch(e) {
       setError("Something went wrong. Is the backend running?")
-      setStep("idle")
+      setPhase("input")
     }
   }
 
-  const delay = ms => new Promise(r => setTimeout(r, ms))
-  const m = mood ? MOODS[mood] || { color: "#888", bg: "#f5f5f5", emoji: "✨" } : null
+  function reset() {
+    setPhase("input")
+    setStanzas([])
+    setPoem("")
+    setTotal(0)
+  }
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#faf8f4",
-      fontFamily: "'DM Sans', system-ui, sans-serif",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      padding: "48px 24px",
-    }}>
+    <div style={{ fontFamily: "'Georgia', serif", background: "#0a0a0a", minHeight: "100vh", color: "#fff" }}>
 
-      {/* Header */}
-      <div style={{ textAlign: "center", marginBottom: 40 }}>
-        <h1 style={{ fontSize: 32, fontWeight: 300, letterSpacing: -0.5, color: "#1a1814", margin: 0 }}>
-          Poem → Visual
-        </h1>
-        <p style={{ color: "#8a8680", fontSize: 14, marginTop: 8, fontWeight: 300 }}>
-          Paste a poem. Watch it become an image.
+      {/* ── Hero / Input ── */}
+      <div style={{
+        minHeight: "100vh", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        padding: "48px 24px", textAlign: "center",
+        background: "linear-gradient(180deg, #0a0a0a 0%, #111318 100%)"
+      }}>
+        <p style={{ fontSize: 12, letterSpacing: 4, textTransform: "uppercase", color: "#666", marginBottom: 16 }}>
+          Poem → Visual Experience
         </p>
-      </div>
+        <h1 style={{ fontSize: "clamp(32px, 6vw, 64px)", fontWeight: 400, letterSpacing: -1, margin: "0 0 16px", lineHeight: 1.1 }}>
+          Every poem has a world<br />
+          <span style={{ color: "#888", fontStyle: "italic" }}>waiting inside it.</span>
+        </h1>
+        <p style={{ fontSize: 16, color: "#666", marginBottom: 40, maxWidth: 480, lineHeight: 1.6, fontFamily: "system-ui" }}>
+          Paste any poem. AI detects the mood of each stanza, extracts visual imagery, and generates a scroll-driven experience.
+        </p>
 
-      {/* Input */}
-      <div style={{ width: "100%", maxWidth: 600 }}>
-        <textarea
-          value={poem}
-          onChange={e => setPoem(e.target.value)}
-          placeholder="Paste any poem here..."
-          rows={6}
-          style={{
-            width: "100%", padding: "16px", borderRadius: 12,
-            border: "1px solid #e0dbd4", background: "#fff",
-            fontSize: 15, lineHeight: 1.6, color: "#1a1814",
-            resize: "vertical", outline: "none",
-            fontFamily: "inherit", boxSizing: "border-box"
-          }}
-        />
-        <button
-          onClick={generate}
-          disabled={step === "loading" || !poem.trim()}
-          style={{
-            marginTop: 12, width: "100%", padding: "14px",
-            background: step === "loading" ? "#aaa" : "#2d5a8e",
-            color: "#fff", border: "none", borderRadius: 10,
-            fontSize: 15, fontWeight: 500, cursor: step === "loading" ? "not-allowed" : "pointer",
-            transition: "background 0.2s"
-          }}
-        >
-          {step === "loading" ? "Generating..." : "Generate visual"}
-        </button>
+        <div style={{ width: "100%", maxWidth: 560 }}>
+          <textarea
+            value={poem}
+            onChange={e => setPoem(e.target.value)}
+            placeholder={"Paste your poem here...\n\nSeparate stanzas with a blank line."}
+            rows={8}
+            style={{
+              width: "100%", padding: "20px", borderRadius: 12,
+              border: "1px solid #2a2a2a", background: "#111",
+              color: "#e0e0e0", fontSize: 15, lineHeight: 1.8,
+              resize: "vertical", outline: "none", fontFamily: "Georgia, serif",
+              boxSizing: "border-box"
+            }}
+          />
 
-        {error && (
-          <p style={{ color: "#c0392b", fontSize: 13, marginTop: 8 }}>{error}</p>
-        )}
-      </div>
-
-      {/* Results */}
-      {step !== "idle" && step !== "loading" && (
-        <div style={{ width: "100%", maxWidth: 600, marginTop: 32, display: "flex", flexDirection: "column", gap: 16 }}>
-
-          {/* Mood */}
-          {mood && (
-            <div style={{
-              background: m.bg, border: `1px solid ${m.color}40`,
-              borderRadius: 12, padding: "16px 20px",
-              display: "flex", alignItems: "center", gap: 12,
-              animation: "fadeIn 0.4s ease"
-            }}>
-              <span style={{ fontSize: 28 }}>{m.emoji}</span>
-              <div>
-                <div style={{ fontSize: 11, color: m.color, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                  Mood detected
-                </div>
-                <div style={{ fontSize: 20, fontWeight: 500, color: "#1a1814", marginTop: 2 }}>
-                  {mood.charAt(0).toUpperCase() + mood.slice(1)}
-                </div>
-                <div style={{ fontSize: 12, color: "#8a8680", marginTop: 2 }}>
-                  Confidence: {(confidence * 100).toFixed(1)}%
-                </div>
+          {phase === "generating" && (
+            <div style={{ margin: "16px 0", textAlign: "left" }}>
+              <div style={{ fontSize: 12, color: "#666", fontFamily: "system-ui", marginBottom: 8, letterSpacing: 1 }}>
+                BUILDING YOUR EXPERIENCE
+              </div>
+              <div style={{ background: "#1a1a1a", borderRadius: 8, overflow: "hidden", height: 4 }}>
+                <div style={{
+                  height: "100%", background: "#4a90d9",
+                  width: total > 0 ? `${(stanzas.length / total) * 100}%` : "10%",
+                  transition: "width 0.6s ease",
+                  borderRadius: 8
+                }}/>
+              </div>
+              <div style={{ fontSize: 12, color: "#555", fontFamily: "system-ui", marginTop: 8 }}>
+                {stanzas.length === 0
+                  ? "Analysing poem structure..."
+                  : `Generated ${stanzas.length} of ${total} stanzas`}
               </div>
             </div>
           )}
 
-          {/* Keywords */}
-          {keywords.length > 0 && (
-            <div style={{
-              background: "#fff", border: "1px solid #e0dbd4",
-              borderRadius: 12, padding: "16px 20px",
-              animation: "fadeIn 0.4s ease"
-            }}>
-              <div style={{ fontSize: 11, color: "#8a8680", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12 }}>
-                Visual keywords
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {keywords.slice(0, visibleKw).map((kw, i) => (
-                  <span key={i} style={{
-                    background: "#f5f3ef", color: "#4a4640",
-                    padding: "6px 14px", borderRadius: 20,
-                    fontSize: 13, fontWeight: 400,
-                    animation: "fadeIn 0.3s ease"
+          {error && <p style={{ color: "#c0392b", fontSize: 13, marginTop: 8, fontFamily: "system-ui" }}>{error}</p>}
+
+          <button
+            onClick={generate}
+            disabled={phase === "generating" || !poem.trim()}
+            style={{
+              marginTop: 12, width: "100%", padding: "16px",
+              background: phase === "generating" ? "#222" : "#fff",
+              color: phase === "generating" ? "#555" : "#000",
+              border: "none", borderRadius: 10, fontSize: 15,
+              fontWeight: 600, cursor: phase === "generating" ? "not-allowed" : "pointer",
+              fontFamily: "system-ui", letterSpacing: 0.3,
+              transition: "all 0.2s"
+            }}
+          >
+            {phase === "generating" ? "Generating..." : "Generate Experience"}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Scroll Experience ── */}
+      {stanzas.length > 0 && (
+        <div ref={experienceRef}>
+          {stanzas.map((stanza, i) => {
+            const style = MOOD_STYLES[stanza.mood] || DEFAULT_STYLE
+            return (
+              <div key={i} style={{
+                minHeight: "100vh", position: "relative",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {/* Background image */}
+                <div style={{
+                  position: "absolute", inset: 0,
+                  backgroundImage: `url(http://127.0.0.1:8000/stanza-image/${stanza.index}?t=${Date.now()})`,
+                  backgroundSize: "cover", backgroundPosition: "center",
+                  filter: "brightness(0.35)",
+                  transition: "opacity 0.8s ease",
+                }}/>
+
+                {/* Gradient overlay */}
+                <div style={{
+                  position: "absolute", inset: 0,
+                  background: "linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.7) 100%)"
+                }}/>
+
+                {/* Content */}
+                <div style={{
+                  position: "relative", zIndex: 1,
+                  maxWidth: 640, padding: "80px 40px",
+                  textAlign: "center",
+                }}>
+                  {/* Stanza number */}
+                  <div style={{
+                    fontSize: 11, letterSpacing: 4, textTransform: "uppercase",
+                    color: style.accent, marginBottom: 32, fontFamily: "system-ui"
                   }}>
-                    {kw}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+                    {style.emoji} &nbsp; Stanza {i + 1} &nbsp;·&nbsp; {stanza.mood}
+                  </div>
 
-          {/* Image */}
-          {imageUrl && (
-            <div style={{
-              borderRadius: 12, overflow: "hidden",
-              border: "1px solid #e0dbd4",
-              animation: "fadeIn 0.6s ease"
+                  {/* Poem text */}
+                  <div style={{
+                    fontSize: "clamp(18px, 2.5vw, 26px)", lineHeight: 1.9,
+                    color: "#f0f0f0", whiteSpace: "pre-line",
+                    textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+                    marginBottom: 40
+                  }}>
+                    {stanza.text}
+                  </div>
+
+                  {/* Keywords */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+                    {stanza.keywords.map((kw, j) => (
+                      <span key={j} style={{
+                        fontSize: 11, padding: "4px 12px", borderRadius: 20,
+                        background: "rgba(255,255,255,0.08)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        color: "#aaa", fontFamily: "system-ui",
+                        letterSpacing: 0.3
+                      }}>
+                        {kw}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Scroll hint on first stanza */}
+                {i === 0 && (
+                  <div style={{
+                    position: "absolute", bottom: 32, left: "50%",
+                    transform: "translateX(-50%)",
+                    fontSize: 11, color: "#555", letterSpacing: 3,
+                    textTransform: "uppercase", fontFamily: "system-ui",
+                    animation: "pulse 2s infinite"
+                  }}>
+                    scroll ↓
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {/* End screen */}
+          <div style={{
+            minHeight: "60vh", display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            background: "#0a0a0a", padding: 40, textAlign: "center"
+          }}>
+            <p style={{ fontSize: 13, color: "#555", letterSpacing: 3, textTransform: "uppercase", fontFamily: "system-ui", marginBottom: 16 }}>
+              End of poem
+            </p>
+            <p style={{ fontSize: 20, color: "#888", fontStyle: "italic", marginBottom: 40 }}>
+              {stanzas.length} stanzas · {stanzas.length} worlds
+            </p>
+            <button onClick={reset} style={{
+              padding: "12px 32px", background: "transparent",
+              border: "1px solid #333", borderRadius: 8, color: "#888",
+              fontSize: 13, cursor: "pointer", fontFamily: "system-ui",
+              letterSpacing: 1
             }}>
-              <img
-                src={imageUrl}
-                alt="Generated visual"
-                style={{ width: "100%", display: "block" }}
-              />
-              <div style={{ padding: "12px 16px", background: "#fff", fontSize: 12, color: "#8a8680" }}>
-                Generated from poem embeddings → mood classification → keyword extraction → image synthesis
-              </div>
-            </div>
-          )}
-
+              Try another poem
+            </button>
+          </div>
         </div>
       )}
 
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap');
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse {
+          0%, 100% { opacity: 0.4; }
+          50% { opacity: 1; }
+        }
         * { box-sizing: border-box; }
         body { margin: 0; }
-        textarea:focus { border-color: #2d5a8e !important; }
+        textarea:focus { border-color: #444 !important; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #0a0a0a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
       `}</style>
     </div>
   )
