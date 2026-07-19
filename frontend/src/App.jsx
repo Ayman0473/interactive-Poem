@@ -78,7 +78,7 @@ export default function App() {
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || ""
-      const res = await fetch("/api/generate-stanzas", {
+      const res = await fetch(`${apiUrl}/generate-stanzas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ poem })
