@@ -1,4 +1,5 @@
 import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 
 const MOOD_STYLES = {
   tranquil:    { accent: "#2d8a6e", emoji: "🌿" },
@@ -14,23 +15,43 @@ function StanzaImage({ url }) {
   const [loaded, setLoaded] = useState(false)
   const [retries, setRetries] = useState(0)
 
+  // Reset when URL arrives
+  useEffect(() => {
+    if (url) {
+      setLoaded(false)
+      setRetries(0)
+    }
+  }, [url])
+
+  if (!url) {
+    return (
+      <div style={{
+        position: "absolute", inset: 0,
+        background: "#0d0d0d",
+        display: "flex", alignItems: "center", justifyContent: "center"
+      }}>
+        <div style={{ 
+          fontSize: 11, color: "#333", letterSpacing: 3, 
+          fontFamily: "system-ui", animation: "pulse 2s infinite" 
+        }}>
+          GENERATING IMAGE...
+        </div>
+      </div>
+    )
+  }
+
   function handleError() {
     if (retries < 3) {
-      setTimeout(() => {
-        setRetries(r => r + 1)
-      }, 15000)
+      setTimeout(() => setRetries(r => r + 1), 15000)
     }
   }
 
-  // Route through backend proxy to avoid CORB
   const apiUrl = import.meta.env.VITE_API_URL || ""
-
   const proxied = `${apiUrl}/proxy-image?url=${encodeURIComponent(url)}`
   const src = retries === 0 ? proxied : `${proxied}&_retry=${retries}`
 
   return (
     <>
-      {/* Dark fallback while loading */}
       {!loaded && (
         <div style={{
           position: "absolute", inset: 0,
@@ -38,7 +59,7 @@ function StanzaImage({ url }) {
           display: "flex", alignItems: "center", justifyContent: "center"
         }}>
           <div style={{ fontSize: 11, color: "#333", letterSpacing: 3, fontFamily: "system-ui" }}>
-            RENDERING IMAGE{retries > 0 ? ` (attempt ${retries + 1})` : "..."}
+            RENDERING{retries > 0 ? ` (retry ${retries})` : "..."}
           </div>
         </div>
       )}
@@ -105,8 +126,12 @@ export default function App() {
 
           if (data.type === "count") {
             setTotal(data.total)
-          } else if (data.type === "stanza") {
-            setStanzas(prev => [...prev, data])
+          } else if (data.type === "stanza_text") {
+            setStanzas(prev => [...prev, { ...data, image_url: null }])
+          } else if (data.type === "stanza_image") {
+            setStanzas(prev => prev.map(s =>
+              s.index === data.index ? { ...s, image_url: data.image_url } : s
+            ))
           } else if (data.type === "done") {
             setPhase("experience")
             setTimeout(() => {

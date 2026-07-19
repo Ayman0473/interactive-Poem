@@ -37,34 +37,42 @@ def root():
 async def generate_stanzas(req: PoemRequest):
     stanzas = split_into_stanzas(req.poem)
 
-    async def process_stanza(i, stanza_text):
-        await asyncio.sleep(i * 0.5)
-    
-        # Run blocking functions in thread pool so they don't block the event loop
-        loop = asyncio.get_event_loop()
-        mood, confidence = await loop.run_in_executor(None, get_mood, stanza_text)
-        keywords = await loop.run_in_executor(None, extract_keywords, stanza_text, mood)
-        image_url = get_image_url(keywords, mood)
-    
-        return {
-            "type": "stanza",
-            "index": i,
-            "text": stanza_text,
-            "mood": mood,
-            "confidence": round(confidence, 3),
-            "keywords": keywords,
-            "image_url": image_url,
-        }
-
     async def stream():
         yield f"data: {json.dumps({'type': 'count', 'total': len(stanzas)})}\n\n"
 
-        tasks = [process_stanza(i, text) for i, text in enumerate(stanzas)]
-        results = await asyncio.gather(*tasks)
+        # First pass: stream text + keywords immediately for all stanzas
+        stanza_data = []
+        for i, stanza_text in enumerate(stanzas):
+            loop = asyncio.get_event_loop()
+            mood, confidence = await loop.run_in_executor(None, get_mood, stanza_text)
+            keywords = await loop.run_in_executor(None, extract_keywords, stanza_text, mood)
+            
+            data = {
+                "index": i,
+                "text": stanza_text,
+                "mood": mood,
+                "confidence": round(confidence, 3),
+                "keywords": keywords,
+            }
+            stanza_data.append(data)
 
-        for result in results:
-            yield f"data: {json.dumps(result)}\n\n"
-            await asyncio.sleep(0.05)
+            # Stream text immediately — no image yet
+            yield f"data: {json.dumps({'type': 'stanza_text', **data})}\n\n"
+
+        # Second pass: generate images in parallel, stream each as it's ready
+        async def generate_image_for_stanza(data):
+            loop = asyncio.get_event_loop()
+            image_url = await loop.run_in_executor(
+                None, get_image_url, data['keywords'], data['mood']
+            )
+            return {"type": "stanza_image", "index": data['index'], "image_url": image_url}
+
+        tasks = [asyncio.ensure_future(generate_image_for_stanza(d)) for d in stanza_data]
+        pending = set(tasks)
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                yield f"data: {json.dumps(task.result())}\n\n"
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
