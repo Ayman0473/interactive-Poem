@@ -23,7 +23,9 @@ function StanzaImage({ url }) {
   }
 
   // Route through backend proxy to avoid CORB
-  const proxied = `/api/proxy-image?url=${encodeURIComponent(url)}`
+  const apiUrl = import.meta.env.VITE_API_URL || ""
+
+  const proxied = `${apiUrl}/proxy-image?url=${encodeURIComponent(url)}`
   const src = retries === 0 ? proxied : `${proxied}&_retry=${retries}`
 
   return (
@@ -75,6 +77,7 @@ export default function App() {
     setTotal(0)
 
     try {
+      const apiUrl = import.meta.env.VITE_API_URL || ""
       const res = await fetch("/api/generate-stanzas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
