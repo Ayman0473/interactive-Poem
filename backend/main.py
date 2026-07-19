@@ -37,25 +37,30 @@ def root():
 async def generate_stanzas(req: PoemRequest):
     stanzas = split_into_stanzas(req.poem)
 
+    async def process_stanza(i, stanza_text):
+        await asyncio.sleep(i * 0.5)  # stagger Groq calls
+        mood, confidence = get_mood(stanza_text)
+        keywords = extract_keywords(stanza_text, mood)
+        image_url = get_image_url(keywords, mood)
+        return {
+            "type": "stanza",
+            "index": i,
+            "text": stanza_text,
+            "mood": mood,
+            "confidence": round(confidence, 3),
+            "keywords": keywords,
+            "image_url": image_url,
+        }
+
     async def stream():
         yield f"data: {json.dumps({'type': 'count', 'total': len(stanzas)})}\n\n"
 
-        for i, stanza_text in enumerate(stanzas):
-            mood, confidence = get_mood(stanza_text)
-            keywords = extract_keywords(stanza_text, mood)
-            image_url = get_image_url(keywords, mood)
+        tasks = [process_stanza(i, text) for i, text in enumerate(stanzas)]
+        results = await asyncio.gather(*tasks)
 
-            event = {
-                "type": "stanza",
-                "index": i,
-                "text": stanza_text,
-                "mood": mood,
-                "confidence": round(confidence, 3),
-                "keywords": keywords,
-                "image_url": image_url,
-            }
-            yield f"data: {json.dumps(event)}\n\n"
-            await asyncio.sleep(3)
+        for result in results:
+            yield f"data: {json.dumps(result)}\n\n"
+            await asyncio.sleep(0.05)
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
@@ -64,8 +69,6 @@ async def generate_stanzas(req: PoemRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
-
-
 @app.get("/proxy-image")
 async def proxy_image(url: str):
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
