@@ -69,7 +69,11 @@ export default function App() {
   const [error, setError]     = useState(null)
   const experienceRef         = useRef(null)
 
+  
   async function generate() {
+    console.log("API URL:", import.meta.env.VITE_API_URL)
+    console.log("Full URL:", `${import.meta.env.VITE_API_URL}/generate-stanzas`)
+    if (!poem.trim()) return
     if (!poem.trim()) return
     setPhase("generating")
     setStanzas([])
