@@ -38,19 +38,23 @@ async def generate_stanzas(req: PoemRequest):
     stanzas = split_into_stanzas(req.poem)
 
     async def process_stanza(i, stanza_text):
-        await asyncio.sleep(i * 0.5)  # stagger Groq calls
-        mood, confidence = get_mood(stanza_text)
-        keywords = extract_keywords(stanza_text, mood)
-        image_url = get_image_url(keywords, mood)
-        return {
-            "type": "stanza",
-            "index": i,
-            "text": stanza_text,
-            "mood": mood,
-            "confidence": round(confidence, 3),
-            "keywords": keywords,
-            "image_url": image_url,
-        }
+    await asyncio.sleep(i * 0.5)
+    
+    # Run blocking functions in thread pool so they don't block the event loop
+    loop = asyncio.get_event_loop()
+    mood, confidence = await loop.run_in_executor(None, get_mood, stanza_text)
+    keywords = await loop.run_in_executor(None, extract_keywords, stanza_text, mood)
+    image_url = get_image_url(keywords, mood)
+    
+    return {
+        "type": "stanza",
+        "index": i,
+        "text": stanza_text,
+        "mood": mood,
+        "confidence": round(confidence, 3),
+        "keywords": keywords,
+        "image_url": image_url,
+    }
 
     async def stream():
         yield f"data: {json.dumps({'type': 'count', 'total': len(stanzas)})}\n\n"
